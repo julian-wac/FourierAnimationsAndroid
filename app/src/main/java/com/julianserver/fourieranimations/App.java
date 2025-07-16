@@ -1,23 +1,16 @@
 package com.julianserver.fourieranimations;
 
-import com.parse.Parse;
 import android.app.Application;
+import android.util.Log;
 
 public class App extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
 
-        Parse.setLogLevel(Parse.LOG_LEVEL_DEBUG);
+        Log.i("FourierApp", "Fourier Animations app started");
 
-
-        Parse.initialize(new Parse.Configuration.Builder(this)
-                .applicationId("FourierAnimations")
-
-                .server("http://192.168.1.182:1337/parse")
-                .build()
-
-
-        );
+        // You can add any global app initialization here if needed
+        // For example: crash reporting, analytics, global configurations
     }
 }

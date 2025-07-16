@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 29
+    compileSdkVersion 36
 
     defaultConfig {
         applicationId "com.julianserver.fourieranimations"
@@ -23,10 +23,22 @@ android {
 }
 
 dependencies {
+
+    // HTTP client for backend communication
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // JSON handling (if not already included)
+    implementation 'org.json:json:20230618'
+
+    // Video player (optional, for displaying animations)
+    implementation 'com.google.android.exoplayer:exoplayer:2.19.1'
+
+    // Image loading (optional, for thumbnails)
+    implementation 'com.github.bumptech.glide:glide:4.16.0'
+
     implementation fileTree(dir: "libs", include: ["*.jar"])
     implementation 'androidx.appcompat:appcompat:1.2.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.0.4'
-    implementation "com.github.parse-community.Parse-SDK-Android:parse:1.25.0"
     testImplementation 'junit:junit:4.12'
     androidTestImplementation 'androidx.test.ext:junit:1.1.2'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.3.0'
