@@ -14,36 +14,121 @@
         android:background="@android:color/white"
         android:scaleType="fitXY" />
 
+    <!-- Video player (hidden by default) -->
+    <VideoView
+        android:id="@+id/videoView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@+id/buttonContainer"
+        android:layout_centerInParent="true"
+        android:visibility="gone" />
+
     <!-- Button container at bottom -->
     <LinearLayout
         android:id="@+id/buttonContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:padding="16dp"
-        android:background="@android:color/black"
-        android:gravity="center">
+        android:background="@android:color/black">
 
-        <Button
-            android:id="@+id/clearButton"
-            android:layout_width="0dp"
+        <!-- Epicycles slider and text -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp"
-            android:text="Clear"
-            android:backgroundTint="@android:color/holo_red_light"
-            android:textColor="@android:color/white" />
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical">
 
-        <Button
-            android:id="@+id/generateButton"
-            android:layout_width="0dp"
+            <TextView
+                android:id="@+id/epicyclesText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Epicycles: 50"
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:minWidth="100dp" />
+
+            <SeekBar
+                android:id="@+id/epicyclesSeekBar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:progressTint="@android:color/holo_blue_bright"
+                android:thumbTint="@android:color/holo_blue_bright" />
+
+        </LinearLayout>
+
+        <!-- Speed slider and text -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="2"
-            android:layout_marginStart="8dp"
-            android:text="Generate Fourier Animation"
-            android:backgroundTint="@android:color/holo_blue_bright"
-            android:textColor="@android:color/white" />
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/speedText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Duration: 12s"
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:minWidth="100dp" />
+
+            <SeekBar
+                android:id="@+id/speedSeekBar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:progressTint="@android:color/holo_green_light"
+                android:thumbTint="@android:color/holo_green_light" />
+
+        </LinearLayout>
+
+        <!-- Buttons row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/clearButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="Clear"
+                android:backgroundTint="@android:color/holo_red_light"
+                android:textColor="@android:color/white" />
+
+            <Button
+                android:id="@+id/playVideoButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:layout_marginStart="4dp"
+                android:text="Play"
+                android:backgroundTint="@android:color/holo_green_dark"
+                android:textColor="@android:color/white"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/generateButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="2"
+                android:layout_marginStart="4dp"
+                android:text="Generate Fourier Animation"
+                android:backgroundTint="@android:color/holo_blue_bright"
+                android:textColor="@android:color/white" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
@@ -56,7 +141,7 @@
         android:visibility="gone"
         style="?android:attr/progressBarStyleLarge" />
 
-    <!-- Loading overlay -->
+    <!-- Loading overlay with detailed progress -->
     <RelativeLayout
         android:id="@+id/loadingOverlay"
         android:layout_width="match_parent"
@@ -73,18 +158,31 @@
             android:background="@android:color/white"
             android:padding="32dp">
 
-            <ProgressBar
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                style="?android:attr/progressBarStyleLarge" />
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:text="Generating Fourier Animation..."
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
+                android:text="Generating Fourier Animation"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/black"
+                android:layout_marginBottom="16dp" />
+
+            <ProgressBar
+                android:id="@+id/renderProgressBar"
+                android:layout_width="250dp"
+                android:layout_height="wrap_content"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:max="100"
+                android:progress="0"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/renderProgressText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Starting..."
+                android:textSize="14sp"
+                android:textColor="@android:color/darker_gray" />
 
         </LinearLayout>
 

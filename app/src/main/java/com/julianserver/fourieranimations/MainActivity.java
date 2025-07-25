@@ -9,6 +9,8 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PointF;
+import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
@@ -17,13 +19,20 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
+import android.widget.SeekBar;
+import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.VideoView;
+import android.widget.MediaController;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,15 +60,34 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
     // UI elements
     private Button generateButton;
     private Button clearButton;
+    private Button playVideoButton;
     private ProgressBar progressBar;
+    private VideoView videoView;
+    private SeekBar epicyclesSeekBar;
+    private TextView epicyclesText;
+    private SeekBar speedSeekBar;
+    private TextView speedText;
+    private ProgressBar renderProgressBar;
+    private TextView renderProgressText;
 
     // Screen dimensions
     private float screenWidth, screenHeight;
     private float centerX, centerY;
 
+    // Touch offset compensation
+    private float touchOffsetY = 0;
+    private boolean offsetCalculated = false;
+
+    // Animation settings
+    private int numEpicycles = 50;  // Default value
+    private int animationDuration = 12;  // Default 12 seconds
+
     // HTTP client for backend communication
     private OkHttpClient httpClient;
-    private static final String BACKEND_URL = "http://192.168.1.182:5000"; // Change this to your backend URL
+    private static final String BACKEND_URL = "http://192.168.0.33:5000";
+
+    // Video management
+    private String currentVideoPath = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,9 +102,23 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         imageView = findViewById(R.id.imageView);
         generateButton = findViewById(R.id.generateButton);
         clearButton = findViewById(R.id.clearButton);
+        playVideoButton = findViewById(R.id.playVideoButton);
         progressBar = findViewById(R.id.progressBar);
+        videoView = findViewById(R.id.videoView);
+        epicyclesSeekBar = findViewById(R.id.epicyclesSeekBar);
+        epicyclesText = findViewById(R.id.epicyclesText);
+        speedSeekBar = findViewById(R.id.speedSeekBar);
+        speedText = findViewById(R.id.speedText);
+        renderProgressBar = findViewById(R.id.renderProgressBar);
+        renderProgressText = findViewById(R.id.renderProgressText);
 
-        httpClient = new OkHttpClient();
+        // Configure HTTP client with longer timeouts for video generation
+        httpClient = new OkHttpClient.Builder()
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(180, java.util.concurrent.TimeUnit.SECONDS)  // 3 minutes for video generation
+                .build();
+
         allPoints = new ArrayList<>();
         currentStroke = new ArrayList<>();
 
@@ -89,50 +131,145 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         // Set up button listeners
         generateButton.setOnClickListener(v -> generateFourierAnimation());
         clearButton.setOnClickListener(v -> clearDrawing());
+        playVideoButton.setOnClickListener(v -> playCurrentVideo());
+
+        // Set up epicycles slider
+        epicyclesSeekBar.setMin(5);  // Minimum 5 epicycles
+        epicyclesSeekBar.setMax(200); // Maximum 200 epicycles
+        epicyclesSeekBar.setProgress(numEpicycles); // Set default
+        epicyclesText.setText("Epicycles: " + numEpicycles);
+
+        epicyclesSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                numEpicycles = progress;
+                epicyclesText.setText("Epicycles: " + numEpicycles);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                // Not needed
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                // Not needed
+            }
+        });
+
+        // Set up speed slider
+        speedSeekBar.setMin(2);   // Minimum 2 seconds
+        speedSeekBar.setMax(30);  // Maximum 30 seconds
+        speedSeekBar.setProgress(animationDuration); // Set default
+        speedText.setText("Duration: " + animationDuration + "s");
+
+        speedSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                animationDuration = progress;
+                speedText.setText("Duration: " + animationDuration + "s");
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                // Not needed
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                // Not needed
+            }
+        });
+
+        // Initially hide video UI
+        videoView.setVisibility(View.GONE);
+        playVideoButton.setVisibility(View.GONE);
+
+        // Calculate touch offset after layout is complete
+        imageView.post(() -> calculateTouchOffset());
+    }
+
+    private void calculateTouchOffset() {
+        // Get the location of the ImageView on screen
+        int[] location = new int[2];
+        imageView.getLocationOnScreen(location);
+
+        // Calculate any offset from the top of the screen
+        touchOffsetY = location[1];
+        offsetCalculated = true;
+
+        Log.i("Touch", "Touch offset calculated: Y=" + touchOffsetY);
     }
 
     private void setupDrawing() {
-        bitmap = Bitmap.createBitmap((int) screenWidth, (int) screenHeight, Bitmap.Config.ARGB_8888);
-        canvas = new Canvas(bitmap);
-        canvas.drawColor(Color.WHITE); // White background
+        // Get actual dimensions of the ImageView after layout
+        imageView.post(() -> {
+            int viewWidth = imageView.getWidth();
+            int viewHeight = imageView.getHeight();
 
-        // Main drawing paint
-        paint = new Paint();
-        paint.setColor(Color.BLACK);
-        paint.setStrokeWidth(8f);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setAntiAlias(true);
-        paint.setStrokeCap(Paint.Cap.ROUND);
-        paint.setStrokeJoin(Paint.Join.ROUND);
+            if (viewWidth > 0 && viewHeight > 0) {
+                // Use actual view dimensions for the bitmap
+                bitmap = Bitmap.createBitmap(viewWidth, viewHeight, Bitmap.Config.ARGB_8888);
+                canvas = new Canvas(bitmap);
+                canvas.drawColor(Color.WHITE);
 
-        currentPath = new Path();
+                paint = new Paint();
+                paint.setColor(Color.BLACK);
+                paint.setStrokeWidth(8f);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setAntiAlias(true);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                paint.setStrokeJoin(Paint.Join.ROUND);
 
-        imageView.setImageBitmap(bitmap);
-        imageView.setOnTouchListener(this);
+                currentPath = new Path();
+
+                imageView.setImageBitmap(bitmap);
+                imageView.setOnTouchListener(this);
+
+                // Update center points based on actual view size
+                centerX = viewWidth / 2f;
+                centerY = viewHeight / 2f;
+
+                Log.i("Drawing", "Canvas initialized: " + viewWidth + "x" + viewHeight);
+            }
+        });
     }
 
     public boolean onTouch(View v, MotionEvent event) {
-        float x = event.getX();
-        float y = event.getY();
+        // Get raw coordinates and adjust for view position
+        float rawX = event.getRawX();
+        float rawY = event.getRawY();
+
+        // Get view location on screen
+        int[] viewLocation = new int[2];
+        v.getLocationOnScreen(viewLocation);
+
+        // Calculate actual touch position relative to the view
+        float x = rawX - viewLocation[0];
+        float y = rawY - viewLocation[1];
+
+        // Alternative method - use regular coordinates but ensure they're within bounds
+        // float x = event.getX();
+        // float y = event.getY();
+
+        // Ensure coordinates are within view bounds
+        x = Math.max(0, Math.min(x, v.getWidth()));
+        y = Math.max(0, Math.min(y, v.getHeight()));
 
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 startNewStroke(x, y);
                 break;
-
             case MotionEvent.ACTION_MOVE:
                 continueStroke(x, y);
                 break;
-
             case MotionEvent.ACTION_UP:
                 finishStroke(x, y);
                 break;
-
             case MotionEvent.ACTION_CANCEL:
                 cancelStroke();
                 break;
         }
-
         return true;
     }
 
@@ -141,8 +278,11 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         currentStroke.clear();
         currentPath.reset();
         currentPath.moveTo(x, y);
-
         addPointToStroke(x, y);
+
+        // Draw a small circle at the start point for visual feedback
+        canvas.drawCircle(x, y, 4, paint);
+        imageView.invalidate();
     }
 
     private void continueStroke(float x, float y) {
@@ -150,7 +290,23 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
             currentPath.lineTo(x, y);
             addPointToStroke(x, y);
 
-            // Draw on canvas
+            // Clear canvas and redraw everything including current path
+            canvas.drawColor(Color.WHITE);
+
+            // Redraw all previous strokes
+            Path allPreviousPath = new Path();
+            PointF prevPoint = null;
+            for (PointF point : allPoints) {
+                if (prevPoint == null) {
+                    allPreviousPath.moveTo(point.x, point.y);
+                } else {
+                    allPreviousPath.lineTo(point.x, point.y);
+                }
+                prevPoint = point;
+            }
+            canvas.drawPath(allPreviousPath, paint);
+
+            // Draw current path
             canvas.drawPath(currentPath, paint);
             imageView.invalidate();
         }
@@ -159,13 +315,13 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
     private void finishStroke(float x, float y) {
         if (isDrawing) {
             addPointToStroke(x, y);
-
-            // Add current stroke to all points
             allPoints.addAll(new ArrayList<>(currentStroke));
-
             isDrawing = false;
             Log.i("Drawing", "Stroke finished with " + currentStroke.size() + " points");
-            Log.i("Drawing", "Total points: " + allPoints.size());
+
+            // Final redraw
+            canvas.drawPath(currentPath, paint);
+            imageView.invalidate();
         }
     }
 
@@ -173,6 +329,26 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         isDrawing = false;
         currentStroke.clear();
         currentPath.reset();
+
+        // Redraw without the cancelled stroke
+        redrawAllStrokes();
+    }
+
+    private void redrawAllStrokes() {
+        canvas.drawColor(Color.WHITE);
+
+        Path allPath = new Path();
+        PointF prevPoint = null;
+        for (PointF point : allPoints) {
+            if (prevPoint == null) {
+                allPath.moveTo(point.x, point.y);
+            } else {
+                allPath.lineTo(point.x, point.y);
+            }
+            prevPoint = point;
+        }
+        canvas.drawPath(allPath, paint);
+        imageView.invalidate();
     }
 
     private void addPointToStroke(float x, float y) {
@@ -185,33 +361,76 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
             return;
         }
 
-        progressBar.setVisibility(View.VISIBLE);
+        // Show loading overlay with progress bar
+        findViewById(R.id.loadingOverlay).setVisibility(View.VISIBLE);
+        renderProgressBar.setProgress(0);
+        renderProgressText.setText("Starting...");
         generateButton.setEnabled(false);
         generateButton.setText("Generating...");
 
-        Log.i("Fourier", "Starting animation generation with " + allPoints.size() + " points");
+        // Hide video UI during generation
+        videoView.setVisibility(View.GONE);
+        playVideoButton.setVisibility(View.GONE);
 
-        // Convert points to normalized complex coordinates
         JSONArray pointsArray = new JSONArray();
 
         try {
-            for (PointF point : allPoints) {
-                JSONObject pointObj = new JSONObject();
-                // Normalize coordinates to [-1, 1] range and center
-                double normalizedX = (point.x - centerX) / (screenWidth / 2);
-                double normalizedY = -(point.y - centerY) / (screenHeight / 2); // Flip Y for math convention
+            // Use actual ImageView dimensions (the drawable area only)
+            float drawableWidth = imageView.getWidth();
+            float drawableHeight = imageView.getHeight();
+            float drawableCenterX = drawableWidth / 2f;
+            float drawableCenterY = drawableHeight / 2f;
 
-                pointObj.put("x", normalizedX);
-                pointObj.put("y", normalizedY);
+            Log.i("Canvas", "Drawable area dimensions: " + drawableWidth + "x" + drawableHeight);
+
+            // Calculate bounds of the drawing
+            float minX = Float.MAX_VALUE, maxX = Float.MIN_VALUE;
+            float minY = Float.MAX_VALUE, maxY = Float.MIN_VALUE;
+
+            for (PointF point : allPoints) {
+                // Get normalized coordinates
+                float normX = (point.x - drawableCenterX) / (drawableWidth / 2);
+                float normY = -(point.y - drawableCenterY) / (drawableHeight / 2);
+
+                minX = Math.min(minX, normX);
+                maxX = Math.max(maxX, normX);
+                minY = Math.min(minY, normY);
+                maxY = Math.max(maxY, normY);
+
+                JSONObject pointObj = new JSONObject();
+                pointObj.put("x", normX);
+                pointObj.put("y", normY);
                 pointsArray.put(pointObj);
             }
 
-            // Create request body
+            // Create bounds object
+            JSONObject boundsObj = new JSONObject();
+            boundsObj.put("min_x", minX);
+            boundsObj.put("max_x", maxX);
+            boundsObj.put("min_y", minY);
+            boundsObj.put("max_y", maxY);
+            boundsObj.put("center_x", (minX + maxX) / 2);
+            boundsObj.put("center_y", (minY + maxY) / 2);
+            boundsObj.put("width", maxX - minX);
+            boundsObj.put("height", maxY - minY);
+
             JSONObject requestBody = new JSONObject();
             requestBody.put("points", pointsArray);
-            requestBody.put("num_epicycles", 50); // Number of epicycles to use
-            requestBody.put("animation_length", 10); // Animation length in seconds
+            requestBody.put("num_epicycles", numEpicycles);  // Use the slider value
+            requestBody.put("animation_length", animationDuration);   // Use the duration slider value
 
+            // Send ImageView dimensions (drawable area only, not full screen)
+            requestBody.put("canvas_width", drawableWidth);
+            requestBody.put("canvas_height", drawableHeight);
+
+            // Send bounds information
+            requestBody.put("bounds", boundsObj);
+
+            // Add timestamp to ensure unique requests
+            requestBody.put("timestamp", System.currentTimeMillis());
+
+            Log.i("Request", "Sending animation request with drawable area: " + drawableWidth + "x" + drawableHeight);
+            Log.i("Request", String.format("Drawing bounds: X[%.2f, %.2f], Y[%.2f, %.2f]", minX, maxX, minY, maxY));
             sendToBackend(requestBody.toString());
 
         } catch (JSONException e) {
@@ -230,12 +449,12 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
                 .post(body)
                 .build();
 
-        Log.i("HTTP", "Sending request to: " + BACKEND_URL);
+        // Simulate progress updates
+        simulateProgress();
 
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                Log.e("HTTP", "Request failed: " + e.getMessage());
                 runOnUiThread(() -> {
                     showError("Network error: " + e.getMessage());
                     resetUI();
@@ -244,26 +463,23 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                Log.i("HTTP", "Response received with code: " + response.code());
-
                 runOnUiThread(() -> {
                     if (response.isSuccessful()) {
                         try {
                             String responseData = response.body().string();
-                            Log.i("HTTP", "Response data: " + responseData);
-
                             JSONObject result = new JSONObject(responseData);
                             String animationUrl = result.getString("animation_url");
 
-                            // Handle successful animation generation
+                            // Update progress to completion
+                            renderProgressBar.setProgress(100);
+                            renderProgressText.setText("Complete! Downloading video...");
+
                             handleAnimationReady(animationUrl);
 
                         } catch (Exception e) {
-                            Log.e("JSON", "Error processing response: " + e.getMessage());
                             showError("Error processing response: " + e.getMessage());
                         }
                     } else {
-                        Log.e("HTTP", "Server error: " + response.code());
                         showError("Server error: " + response.code());
                     }
                     resetUI();
@@ -272,18 +488,180 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         });
     }
 
+    private void simulateProgress() {
+        // Simulate progress updates based on typical generation time
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+                runOnUiThread(() -> {
+                    renderProgressBar.setProgress(10);
+                    renderProgressText.setText("Processing points...");
+                });
+
+                Thread.sleep(2000);
+                runOnUiThread(() -> {
+                    renderProgressBar.setProgress(25);
+                    renderProgressText.setText("Calculating Fourier coefficients...");
+                });
+
+                Thread.sleep(3000);
+                runOnUiThread(() -> {
+                    renderProgressBar.setProgress(40);
+                    renderProgressText.setText("Creating epicycles...");
+                });
+
+                Thread.sleep(4000);
+                runOnUiThread(() -> {
+                    renderProgressBar.setProgress(60);
+                    renderProgressText.setText("Rendering animation...");
+                });
+
+                Thread.sleep(5000);
+                runOnUiThread(() -> {
+                    renderProgressBar.setProgress(80);
+                    renderProgressText.setText("Finalizing video...");
+                });
+
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
     private void handleAnimationReady(String animationUrl) {
         Log.i("Animation", "Animation ready at: " + animationUrl);
-        Toast.makeText(this, "Animation ready! Opening...", Toast.LENGTH_LONG).show();
 
-        // Here you could:
-        // 1. Download and display the video
-        // 2. Open it in a video player
-        // 3. Share the URL
-        // 4. Show a preview
+        // Clear any previous video first
+        if (currentVideoPath != null) {
+            File oldFile = new File(currentVideoPath);
+            if (oldFile.exists()) {
+                boolean deleted = oldFile.delete();
+                Log.i("Video", "Deleted old video: " + deleted);
+            }
+            currentVideoPath = null;
+        }
 
-        // For now, just show success message
-        showSuccess("Fourier animation generated successfully!\nURL: " + animationUrl);
+        Toast.makeText(this, "Animation ready! Downloading...", Toast.LENGTH_SHORT).show();
+
+        // Download the video
+        downloadVideo(animationUrl);
+    }
+
+    private void downloadVideo(String animationUrl) {
+        String fullUrl = BACKEND_URL + animationUrl;
+
+        Request request = new Request.Builder()
+                .url(fullUrl)
+                .addHeader("Cache-Control", "no-cache") // Force fresh download
+                .build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                runOnUiThread(() -> showError("Failed to download video: " + e.getMessage()));
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (response.isSuccessful()) {
+                    // Create unique filename with timestamp
+                    String timestamp = String.valueOf(System.currentTimeMillis());
+                    String filename = "fourier_animation_" + timestamp + ".mp4";
+                    File videoFile = new File(getFilesDir(), filename);
+
+                    // Delete old video file if it exists
+                    if (currentVideoPath != null) {
+                        File oldFile = new File(currentVideoPath);
+                        if (oldFile.exists()) {
+                            oldFile.delete();
+                            Log.i("Video", "Deleted old video file");
+                        }
+                    }
+
+                    try (InputStream inputStream = response.body().byteStream();
+                         FileOutputStream outputStream = new FileOutputStream(videoFile)) {
+
+                        byte[] buffer = new byte[4096];
+                        int bytesRead;
+                        long totalBytes = 0;
+                        while ((bytesRead = inputStream.read(buffer)) != -1) {
+                            outputStream.write(buffer, 0, bytesRead);
+                            totalBytes += bytesRead;
+                        }
+
+                        currentVideoPath = videoFile.getAbsolutePath();
+
+                        Log.i("Video", "Downloaded new video: " + filename + " (" + totalBytes + " bytes)");
+
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, "New video downloaded! Ready to play.", Toast.LENGTH_SHORT).show();
+                            showVideoControls();
+                        });
+
+                    } catch (IOException e) {
+                        runOnUiThread(() -> showError("Failed to save video: " + e.getMessage()));
+                    }
+                } else {
+                    runOnUiThread(() -> showError("Failed to download video: " + response.code()));
+                }
+            }
+        });
+    }
+
+    private void showVideoControls() {
+        playVideoButton.setVisibility(View.VISIBLE);
+        playVideoButton.setText("Play Animation");
+    }
+
+    private void playCurrentVideo() {
+        if (currentVideoPath == null) {
+            Toast.makeText(this, "No video available", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Log.i("Video", "Playing video: " + currentVideoPath);
+
+        // Hide drawing canvas and show video
+        imageView.setVisibility(View.GONE);
+        videoView.setVisibility(View.VISIBLE);
+
+        // Clear any previous video and force reload
+        videoView.stopPlayback();
+        videoView.clearFocus();
+
+        // Set up video playback with fresh URI
+        Uri videoUri = Uri.fromFile(new File(currentVideoPath));
+        Log.i("Video", "Setting video URI: " + videoUri.toString());
+
+        videoView.setVideoURI(videoUri);
+
+        // Add media controller for play/pause controls
+        MediaController mediaController = new MediaController(this);
+        videoView.setMediaController(mediaController);
+        mediaController.setAnchorView(videoView);
+
+        // Set up video completion listener
+        videoView.setOnCompletionListener(mp -> {
+            Log.i("Video", "Video playback completed");
+            // Video finished playing, show drawing canvas again
+            videoView.setVisibility(View.GONE);
+            imageView.setVisibility(View.VISIBLE);
+            playVideoButton.setText("Replay Animation");
+        });
+
+        // Set up error listener
+        videoView.setOnErrorListener((mp, what, extra) -> {
+            Log.e("Video", "Video playback error: what=" + what + ", extra=" + extra);
+            showError("Video playback failed");
+            videoView.setVisibility(View.GONE);
+            imageView.setVisibility(View.VISIBLE);
+            return true;
+        });
+
+        // Start playing
+        videoView.start();
+
+        Toast.makeText(this, "Playing NEW Fourier animation!", Toast.LENGTH_SHORT).show();
     }
 
     private void clearDrawing() {
@@ -291,11 +669,17 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         currentStroke.clear();
         currentPath.reset();
 
-        // Clear the canvas
         canvas.drawColor(Color.WHITE);
         imageView.invalidate();
 
-        Log.i("Drawing", "Drawing cleared");
+        // Hide video controls
+        videoView.setVisibility(View.GONE);
+        playVideoButton.setVisibility(View.GONE);
+        currentVideoPath = null;
+
+        // Show drawing canvas
+        imageView.setVisibility(View.VISIBLE);
+
         Toast.makeText(this, "Drawing cleared", Toast.LENGTH_SHORT).show();
     }
 
@@ -304,54 +688,10 @@ public class MainActivity extends AppCompatActivity implements View.OnTouchListe
         Log.e("FourierApp", message);
     }
 
-    private void showSuccess(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-        Log.i("FourierApp", message);
-    }
-
     private void resetUI() {
+        findViewById(R.id.loadingOverlay).setVisibility(View.GONE);
         progressBar.setVisibility(View.GONE);
         generateButton.setEnabled(true);
         generateButton.setText("Generate Fourier Animation");
-    }
-
-    // Utility method to get drawing stats
-    public void logDrawingStats() {
-        Log.i("Stats", "Total points collected: " + allPoints.size());
-        if (!allPoints.isEmpty()) {
-            Log.i("Stats", "Drawing bounds: (" + getMinX() + "," + getMinY() + ") to (" + getMaxX() + "," + getMaxY() + ")");
-        }
-    }
-
-    private float getMinX() {
-        float min = Float.MAX_VALUE;
-        for (PointF point : allPoints) {
-            if (point.x < min) min = point.x;
-        }
-        return min;
-    }
-
-    private float getMaxX() {
-        float max = Float.MIN_VALUE;
-        for (PointF point : allPoints) {
-            if (point.x > max) max = point.x;
-        }
-        return max;
-    }
-
-    private float getMinY() {
-        float min = Float.MAX_VALUE;
-        for (PointF point : allPoints) {
-            if (point.y < min) min = point.y;
-        }
-        return min;
-    }
-
-    private float getMaxY() {
-        float max = Float.MIN_VALUE;
-        for (PointF point : allPoints) {
-            if (point.y > max) max = point.y;
-        }
-        return max;
     }
 }
